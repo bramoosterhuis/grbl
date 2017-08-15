@@ -60,7 +60,7 @@ uint8_t spindle_get_state()
 {
 	#ifdef VARIABLE_SPINDLE
     #ifdef USE_SPINDLE_DIR_AS_ENABLE_PIN
-		  // No spindle direction output pin. 
+		  // No spindle direction output pin.
 			#ifdef INVERT_SPINDLE_ENABLE_PIN
 			  if (bit_isfalse(SPINDLE_ENABLE_PORT,(1<<SPINDLE_ENABLE_BIT))) { return(SPINDLE_STATE_CW); }
 	    #else
@@ -74,7 +74,7 @@ uint8_t spindle_get_state()
     #endif
 	#else
 		#ifdef INVERT_SPINDLE_ENABLE_PIN
-		  if (bit_isfalse(SPINDLE_ENABLE_PORT,(1<<SPINDLE_ENABLE_BIT))) { 
+		  if (bit_isfalse(SPINDLE_ENABLE_PORT,(1<<SPINDLE_ENABLE_BIT))) {
 		#else
 		  if (bit_istrue(SPINDLE_ENABLE_PORT,(1<<SPINDLE_ENABLE_BIT))) {
 		#endif
@@ -138,7 +138,7 @@ void spindle_stop()
 
 
   #ifdef ENABLE_PIECEWISE_LINEAR_SPINDLE
-  
+
     // Called by spindle_set_state() and step segment generator. Keep routine small and efficient.
     uint8_t spindle_compute_pwm_value(float rpm) // 328p PWM register is 8-bit.
     {
@@ -160,17 +160,17 @@ void spindle_stop()
         #if (N_PIECES > 3)
           if (rpm > RPM_POINT34) {
             pwm_value = floor(RPM_LINE_A4*rpm - RPM_LINE_B4);
-          } else 
+          } else
         #endif
         #if (N_PIECES > 2)
           if (rpm > RPM_POINT23) {
             pwm_value = floor(RPM_LINE_A3*rpm - RPM_LINE_B3);
-          } else 
+          } else
         #endif
         #if (N_PIECES > 1)
           if (rpm > RPM_POINT12) {
             pwm_value = floor(RPM_LINE_A2*rpm - RPM_LINE_B2);
-          } else 
+          } else
         #endif
         {
           pwm_value = floor(RPM_LINE_A1*rpm - RPM_LINE_B1);
@@ -179,14 +179,16 @@ void spindle_stop()
       sys.spindle_speed = rpm;
       return(pwm_value);
     }
-    
-  #else 
-  
+
+  #else
+
     // Called by spindle_set_state() and step segment generator. Keep routine small and efficient.
     uint8_t spindle_compute_pwm_value(float rpm) // 328p PWM register is 8-bit.
     {
       uint8_t pwm_value;
-      rpm *= (0.010*sys.spindle_speed_ovr); // Scale by spindle speed override value.
+      #ifndef SPINDLE_IS_SERVO
+        rpm *= (0.010*sys.spindle_speed_ovr); // Scale by spindle speed override value.
+      #endif
       // Calculate PWM register value based on rpm max/min settings and programmed rpm.
       if ((settings.rpm_min >= settings.rpm_max) || (rpm >= settings.rpm_max)) {
         // No PWM range possible. Set simple on/off spindle control pin state.
@@ -194,13 +196,18 @@ void spindle_stop()
         pwm_value = SPINDLE_PWM_MAX_VALUE;
       } else if (rpm <= settings.rpm_min) {
         if (rpm == 0.0) { // S0 disables spindle
+        #ifndef SPINDLE_IS_SERVO
           sys.spindle_speed = 0.0;
           pwm_value = SPINDLE_PWM_OFF_VALUE;
+        #else
+          sys.spindle_speed = settings.rpm_min;
+          pwm_value = SPINDLE_PWM_MIN_VALUE;
+        #endif
         } else { // Set minimum PWM output
           sys.spindle_speed = settings.rpm_min;
           pwm_value = SPINDLE_PWM_MIN_VALUE;
         }
-      } else { 
+      } else {
         // Compute intermediate PWM value with linear spindle speed model.
         // NOTE: A nonlinear model could be installed here, if required, but keep it VERY light-weight.
         sys.spindle_speed = rpm;
@@ -208,7 +215,7 @@ void spindle_stop()
       }
       return(pwm_value);
     }
-    
+
   #endif
 #endif
 
@@ -224,14 +231,22 @@ void spindle_stop()
 {
   if (sys.abort) { return; } // Block during abort.
   if (state == SPINDLE_DISABLE) { // Halt or set spindle direction and rpm.
-  
+
     #ifdef VARIABLE_SPINDLE
-      sys.spindle_speed = 0.0;
+      #ifndef SPINDLE_IS_SERVO
+        sys.spindle_speed = 0.0;
+        spindle_stop();
+      #else
+        // For servo send min. PWM instead of deactivate PWM
+        sys.spindle_speed = SPINDLE_PWM_MIN_VALUE;
+        spindle_set_speed(spindle_compute_pwm_value(SPINDLE_PWM_MIN_VALUE));
+      #endif
+    #else
+      spindle_stop();
     #endif
-    spindle_stop();
-  
+
   } else {
-  
+
     #ifndef USE_SPINDLE_DIR_AS_ENABLE_PIN
       if (state == SPINDLE_ENABLE_CW) {
         SPINDLE_DIRECTION_PORT &= ~(1<<SPINDLE_DIRECTION_BIT);
@@ -239,10 +254,10 @@ void spindle_stop()
         SPINDLE_DIRECTION_PORT |= (1<<SPINDLE_DIRECTION_BIT);
       }
     #endif
-  
+
     #ifdef VARIABLE_SPINDLE
       // NOTE: Assumes all calls to this function is when Grbl is not moving or must remain off.
-      if (settings.flags & BITFLAG_LASER_MODE) { 
+      if (settings.flags & BITFLAG_LASER_MODE) {
         if (state == SPINDLE_ENABLE_CCW) { rpm = 0.0; } // TODO: May need to be rpm_min*(100/MAX_SPINDLE_SPEED_OVERRIDE);
       }
       spindle_set_speed(spindle_compute_pwm_value(rpm));
@@ -255,16 +270,16 @@ void spindle_stop()
         SPINDLE_ENABLE_PORT &= ~(1<<SPINDLE_ENABLE_BIT);
       #else
         SPINDLE_ENABLE_PORT |= (1<<SPINDLE_ENABLE_BIT);
-      #endif    
+      #endif
     #endif
-  
+
   }
-  
+
   sys.report_ovr_counter = 0; // Set to report change immediately
 }
 
 
-// G-code parser entry-point for setting spindle state. Forces a planner buffer sync and bails 
+// G-code parser entry-point for setting spindle state. Forces a planner buffer sync and bails
 // if an abort or check-mode is active.
 #ifdef VARIABLE_SPINDLE
   void spindle_sync(uint8_t state, float rpm)
